@@ -1,103 +1,185 @@
-import Image from "next/image";
+"use client";
+
+import { useEffect, useRef, useState } from "react";
+import { useChat } from "@ai-sdk/react";
+import { Mic, Play, Volume2 } from "lucide-react";
+import { Button } from "@/components/ui/button";
+
+// Speech Recognition Types
+interface SpeechRecognitionEvent extends Event {
+  results: {
+    [index: number]: {
+      [index: number]: {
+        transcript: string;
+        confidence: number;
+      };
+      isFinal: boolean;
+      length: number;
+    };
+    length: number;
+  };
+}
+
+interface SpeechRecognition extends EventTarget {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  start(): void;
+  stop(): void;
+  onresult: (event: SpeechRecognitionEvent) => void;
+  onend: () => void;
+}
+
+declare global {
+  interface Window {
+    SpeechRecognition: new () => SpeechRecognition;
+    webkitSpeechRecognition: new () => SpeechRecognition;
+  }
+}
 
 export default function Home() {
-  return (
-    <div className="grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20 font-[family-name:var(--font-geist-sans)]">
-      <main className="flex flex-col gap-[32px] row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="list-inside list-decimal text-sm/6 text-center sm:text-left font-[family-name:var(--font-geist-mono)]">
-          <li className="mb-2 tracking-[-.01em]">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] px-1 py-0.5 rounded font-[family-name:var(--font-geist-mono)] font-semibold">
-              src/app/page.tsx
-            </code>
-            .
-          </li>
-          <li className="tracking-[-.01em]">
-            Save and see your changes instantly.
-          </li>
-        </ol>
+  const recognitionRef = useRef<SpeechRecognition | null>(null);
+  const [start, setStart] = useState(false);
+  const [aiCaption, setAiCaption] = useState<string | null>(null);
+  const [transcript, setTranscript] = useState<string | null>(null);
+  const [isListening, setIsListening] = useState(false);
 
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:w-auto"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 w-full sm:w-auto md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
+  const { input, isLoading, setInput, handleSubmit } = useChat({
+    onResponse: async (response) => {
+      const { text, audio } = await response.json();
+      handleAIResponse(text, audio);
+    },
+  });
+
+  const handleAIResponse = (text: string, audio: string) => {
+    // Stop listening while AI is talking
+    stopListening();
+
+    const audioElement = createAudioElement(audio);
+    setAiCaption(text);
+
+    audioElement.onended = resumeListening;
+    playAudioWithFallback(audioElement);
+  };
+
+  const createAudioElement = (audioData: string) => {
+    const audioBlob = new Blob([Buffer.from(audioData, "base64")], {
+      type: "audio/mpeg",
+    });
+    const audioUrl = URL.createObjectURL(audioBlob);
+    return new Audio(audioUrl);
+  };
+
+  const stopListening = () => {
+    recognitionRef.current?.stop();
+    setIsListening(false);
+    setTranscript(null);
+  };
+
+  const resumeListening = () => {
+    recognitionRef.current?.start();
+    setIsListening(true);
+    setAiCaption(null);
+  };
+
+  const playAudioWithFallback = async (audioElement: HTMLAudioElement) => {
+    try {
+      await audioElement.play();
+    } catch (error) {
+      console.error(
+        "Audio playback failed:",
+        error instanceof Error ? error.message : "Unknown error"
+      );
+      resumeListening();
+    }
+  };
+
+  const initializeSpeechRecognition = () => {
+    if (typeof window === "undefined") return;
+
+    const SpeechRecognition =
+      window.SpeechRecognition || window.webkitSpeechRecognition;
+
+    if (!SpeechRecognition || recognitionRef.current) return;
+
+    recognitionRef.current = new SpeechRecognition();
+    recognitionRef.current.continuous = true;
+    recognitionRef.current.interimResults = true;
+
+    recognitionRef.current.onresult = (event: SpeechRecognitionEvent) => {
+      const results = event.results;
+      if (results.length && results[results.length - 1].isFinal) {
+        setTranscript(results[results.length - 1][0].transcript);
+      }
+    };
+
+    recognitionRef.current.onend = () => {
+      if (isListening) {
+        recognitionRef.current?.start();
+      }
+    };
+  };
+
+  const startConversation = () => {
+    setStart(true);
+    new Audio(
+      "data:audio/mpeg;base64,SUQzBAAAAAABEVRYWFgAAAAtAAADY29tbWVudABCaWdTb3VuZEJhbmsuY29tIC8gTGFTb25vdGhlcXVlLm9yZwBURU5DAAAAHQAAA1N3aXRjaCBQbHVzIMKpIE5DSCBTb2Z0d2FyZQBUSVQyAAAABgAAAzIyMzUAVFNTRQAAAA8AAANMYXZmNTcuODMuMTAwAAAAAAAAAAAAAAD/80DEAAAAA0gAAAAATEFNRTMuMTAwVVVVVVVVVVVVVUxBTUUzLjEwMFVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVf/zQsRbAAADSAAAAABVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVf/zQMSkAAADSAAAAABVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV"
+    ).play();
+    recognitionRef.current?.start();
+    setIsListening(true);
+  };
+
+  useEffect(initializeSpeechRecognition, []);
+
+  useEffect(() => {
+    if (input) handleSubmit();
+  }, [input, handleSubmit]);
+
+  useEffect(() => {
+    if (transcript) setInput(transcript);
+  }, [transcript, setInput]);
+
+  return (
+    <div className="flex h-screen flex-col items-center justify-center bg-gray-50">
+      <div className="relative w-full max-w-2xl mx-auto p-4">
+        <div className="flex justify-center mb-8">
+          {!start ? (
+            <Button
+              size="icon"
+              className="size-16 rounded-full bg-white hover:bg-gray-100 shadow-lg cursor-pointer"
+              onClick={startConversation}
+            >
+              <Play className="size-8 text-blue-500" />
+            </Button>
+          ) : (
+            <div className="w-16 h-16 rounded-full bg-white shadow-lg flex items-center justify-center">
+              {isLoading ? (
+                <div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin" />
+              ) : isListening ? (
+                <Mic className="w-8 h-8 text-blue-500" />
+              ) : (
+                <Volume2 className="w-8 h-8 text-green-500 animate-pulse" />
+              )}
+            </div>
+          )}
         </div>
-      </main>
-      <footer className="row-start-3 flex gap-[24px] flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
+
+        <div className="bg-white rounded-lg shadow-lg p-6 min-h-[100px] flex items-center justify-center">
+          {!start ? (
+            <p className="text-gray-800 text-lg text-center my-auto">
+              Click the play button to start the conversation
+            </p>
+          ) : isLoading ? (
+            <p className="text-gray-800 text-lg text-center">
+              AI is thinking...
+            </p>
+          ) : aiCaption ? (
+            <p className="text-gray-800 text-lg text-center">{aiCaption}</p>
+          ) : (
+            <p className="text-gray-500 text-lg text-center">Listening...</p>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
