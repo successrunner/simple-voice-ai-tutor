@@ -21,9 +21,9 @@ interface SpeechRecognitionEvent extends Event {
 }
 
 interface SpeechRecognition extends EventTarget {
+  lang: string;
   continuous: boolean;
   interimResults: boolean;
-  lang: string;
   start(): void;
   stop(): void;
   onresult: (event: SpeechRecognitionEvent) => void;
@@ -39,6 +39,7 @@ declare global {
 
 export default function Home() {
   const recognitionRef = useRef<SpeechRecognition | null>(null);
+  
   const [start, setStart] = useState(false);
   const [aiCaption, setAiCaption] = useState<string | null>(null);
   const [transcript, setTranscript] = useState<string | null>(null);
