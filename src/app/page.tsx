@@ -39,7 +39,7 @@ declare global {
 
 export default function Home() {
   const recognitionRef = useRef<SpeechRecognition | null>(null);
-  
+
   const [start, setStart] = useState(false);
   const [aiCaption, setAiCaption] = useState<string | null>(null);
   const [transcript, setTranscript] = useState<string | null>(null);
@@ -133,7 +133,10 @@ export default function Home() {
   useEffect(initializeSpeechRecognition, []);
 
   useEffect(() => {
-    if (input) handleSubmit();
+    if (input) {
+      handleSubmit();
+      recognitionRef.current?.stop();
+    }
   }, [input, handleSubmit]);
 
   useEffect(() => {
