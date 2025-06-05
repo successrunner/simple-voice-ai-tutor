@@ -1,17 +1,26 @@
-import { openai } from "@ai-sdk/openai";
-import {
-  experimental_generateSpeech as generateSpeech,
-  generateText,
-} from "ai";
+import { google } from '@ai-sdk/google';
+import { openai } from '@ai-sdk/openai';
+import { ElevenLabsClient } from '@elevenlabs/elevenlabs-js';
+import { generateText } from 'ai';
 
 export const maxDuration = 30;
+export const runtime = 'nodejs';
+
+const elevenlabs = new ElevenLabsClient({
+  apiKey: process.env.ELEVENLABS_API_KEY,
+});
 
 export async function POST(req: Request) {
   try {
-    const { messages } = await req.json();
+    const { model, provider, messages } = await req.json();
 
     const result = await generateText({
-      model: openai("gpt-4"),
+      model:
+        provider === 'OpenAI'
+          ? openai(model)
+          : provider === 'Google'
+            ? google(model)
+            : openai(model),
       system: `You are Coach Sparky, a friendly, patient, and encouraging voice coach for primary school students (ages 6-10).
               Your main goal is to help them with daily goal and agenda setting.
               Communicate using simple, concise, and positive language.
@@ -30,33 +39,21 @@ export async function POST(req: Request) {
       messages,
     });
 
-    const audio = await generateSpeech({
-      model: openai.speech("tts-1"),
+    console.log(result);
+
+    const audioStream = await elevenlabs.textToSpeech.stream('JBFqnCBsd6RMkjVDRZzb', {
       text: result.text,
-      voice: "alloy",
+      modelId: 'eleven_multilingual_v2',
     });
 
-    const audioBlob = new Blob([audio.audio.uint8Array], {
-      type: "audio/mpeg",
+    return new Response(audioStream as never, {
+      headers: {
+        'Content-Type': 'audio/mpeg',
+        'Cache-Control': 'no-cache',
+      },
     });
-
-    // Convert audio blob to base64
-    const arrayBuffer = await audioBlob.arrayBuffer();
-    const base64Audio = Buffer.from(arrayBuffer).toString("base64");
-
-    return new Response(
-      JSON.stringify({
-        text: result.text,
-        audio: base64Audio,
-      }),
-      {
-        headers: {
-          "Content-Type": "application/json",
-        },
-      }
-    );
   } catch (error) {
-    console.error("Error in chat route:", error);
-    return new Response("Error processing your request", { status: 500 });
+    console.error('Error in chat route:', error);
+    return new Response('Error processing your request', { status: 500 });
   }
 }
